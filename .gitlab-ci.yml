@@ -112,10 +112,12 @@ functional:
     - apk add --no-cache curl openssl
   script:
     # Native single-arch build (BuildKit); --provenance=false keeps it a plain
-    # loadable image. PROBE_HOST=docker reaches the published port via the dind
-    # service; the runner is on the internal network so no --add-host is needed.
+    # loadable image. The test probes Caddy from a sibling container sharing its
+    # network namespace (see ci/functional-test.sh), so no published port / dind
+    # port-forwarding is needed; the runner is on the internal network so Cert
+    # Warden resolves without an --add-host.
     - docker build --provenance=false -t caddy-certwarden:func .
-    - IMAGE=caddy-certwarden:func PROBE_HOST=docker sh ci/functional-test.sh
+    - IMAGE=caddy-certwarden:func sh ci/functional-test.sh
 
 # ---------------------------------------------------------------------------
 # discover: resolve the supported Caddy versions and generate the build matrix

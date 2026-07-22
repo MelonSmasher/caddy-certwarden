@@ -12,20 +12,25 @@
 #   CW_TEST_CERT  the certificate NAME in Cert Warden (not its subject)
 #   CW_TEST_KEY   combined download key: <cert-api-key>.<private-key-api-key>
 # Optional:
-#   PROBE_HOST      host:port target maps to the published container port.
-#                   Default "docker" (the GitLab dind service). Use 127.0.0.1
-#                   against a local Docker daemon.
 #   CADDY_RUN_ARGS  extra `docker create` args, e.g. an --add-host mapping when
 #                   the container's resolver can't see an internal Cert Warden.
+#   PROBE_IMAGE     image used for the sibling probe container (default alpine:3.20).
 #
-# Needs curl + openssl on the runner, plus a Docker daemon.
+# The served certificate is checked from a SIBLING container that shares the
+# Caddy container's network namespace (`--network container:<caddy>`), reaching
+# Caddy on 127.0.0.1. This avoids depending on a published port being reachable
+# across containers, which is unreliable under docker-in-docker (the port is
+# published on the dind daemon, not the job container). It works the same against
+# a local Docker daemon and CI dind, so no PROBE_HOST is needed.
+#
+# Needs curl + openssl on the runner (for the fixture fetch), plus a Docker daemon.
 set -eu
 
 : "${IMAGE:?IMAGE is required}"
 : "${CW_TEST_URL:?CW_TEST_URL is required}"
 : "${CW_TEST_CERT:?CW_TEST_CERT is required}"
 : "${CW_TEST_KEY:?CW_TEST_KEY is required}"
-PROBE_HOST="${PROBE_HOST:-docker}"
+PROBE_IMAGE="${PROBE_IMAGE:-alpine:3.20}"
 
 work="$(mktemp -d)"
 container="cwfunc-caddy-$$"
@@ -66,23 +71,28 @@ EOF
 
 echo ">> starting the plugin container"
 # create + cp + start rather than a bind mount: under docker-in-docker a bind
-# mount would come from the dind host, not this job's filesystem.
+# mount would come from the dind host, not this job's filesystem. No published
+# port: the probe reaches Caddy via a shared network namespace (below).
 # shellcheck disable=SC2086
-docker create --name "$container" -p 8443:8443 \
+docker create --name "$container" \
 	-e CW_TEST_KEY="$CW_TEST_KEY" ${CADDY_RUN_ARGS:-} "$IMAGE" >/dev/null
 docker cp "$work/Caddyfile" "$container:/etc/caddy/Caddyfile"
 docker start "$container" >/dev/null
 
-echo ">> probing ${PROBE_HOST}:8443 (SNI ${sni})"
-served=""
-i=0
-while [ "$i" -lt 20 ]; do
-	served="$(echo | openssl s_client -connect "${PROBE_HOST}:8443" -servername "$sni" 2>/dev/null \
-		| openssl x509 -noout -fingerprint -sha256 2>/dev/null || true)"
-	[ -n "$served" ] && break
-	i=$((i + 1))
-	sleep 2
-done
+echo ">> probing the served certificate on 127.0.0.1:8443 (SNI ${sni})"
+# Run openssl in a throwaway container sharing the Caddy container's netns, so it
+# connects to Caddy over loopback. Retries inside the single container to absorb
+# startup. Only the fingerprint is written to stdout (and captured here).
+served="$(docker run --rm --network "container:${container}" "$PROBE_IMAGE" sh -c '
+	apk add --no-cache openssl >/dev/null 2>&1 || true
+	i=0
+	while [ "$i" -lt 20 ]; do
+		fp="$(echo | openssl s_client -connect 127.0.0.1:8443 -servername '"$sni"' 2>/dev/null \
+			| openssl x509 -noout -fingerprint -sha256 2>/dev/null || true)"
+		[ -n "$fp" ] && { printf "%s" "$fp"; exit 0; }
+		i=$((i + 1)); sleep 2
+	done
+' || true)"
 
 echo "served:   ${served:-<none>}"
 echo "expected: ${expected}"
