@@ -27,6 +27,13 @@ set -eu
 
 MINORS="${CADDY_MINORS:-3}"
 
+# The -cache variant carries the darkweak souin cache-handler + storage backends,
+# which track the newest Caddy: the storages monorepo currently pins Caddy
+# v2.11.2 (and Go 1.26.1). So the cache variant has a HIGHER Caddy floor than the
+# base plugin and is only built for Caddy >= CACHE_CADDY_MIN. Bump this when the
+# storages raise their minimum (check `darkweak/storages/*/caddy` go.mod).
+CACHE_CADDY_MIN="${CACHE_CADDY_MIN:-2.11.2}"
+
 # Extra xcaddy modules for the -cache variant: Souin cache-handler + the storage
 # backends (mirrors the caddy-cloudflare-cache image, minus the Cloudflare DNS
 # plugin). Kept on one logical line; the shell removes the backslash-newlines.
@@ -103,7 +110,7 @@ if [ "$PUSH" != "true" ]; then
 	SELECTED="$NEWEST"
 fi
 
-echo "policy:   latest patch of the last ${MINORS} minor line(s), Caddy >= ${CADDY_MIN}"
+echo "policy:   latest patch of the last ${MINORS} minor line(s), Caddy >= ${CADDY_MIN} (cache variant >= ${CACHE_CADDY_MIN})"
 echo "selected: $(printf '%s ' $SELECTED)"
 echo "newest:   ${NEWEST}"
 echo "push:     ${PUSH}   platforms: ${PLATFORMS}"
@@ -165,9 +172,15 @@ seen_majors=""
 		emit_build_job "" "" \
 			"caddy-certwarden" \
 			"Caddy with the certwarden certificate manager (cached certificates from Cert Warden)"
-		emit_build_job "-cache" "$CACHE_WITH" \
-			"caddy-certwarden-cache" \
-			"Caddy with the certwarden certificate manager plus the Souin cache-handler and storage backends"
+		# The cache variant's storage plugins pin a newer Caddy than the base
+		# plugin, so only emit it for Caddy >= CACHE_CADDY_MIN.
+		if [ "$(printf '%s\n%s\n' "$v" "$CACHE_CADDY_MIN" | sort -V | head -n 1)" = "$CACHE_CADDY_MIN" ]; then
+			emit_build_job "-cache" "$CACHE_WITH" \
+				"caddy-certwarden-cache" \
+				"Caddy with the certwarden certificate manager plus the Souin cache-handler and storage backends"
+		else
+			echo "  (skip cache variant for ${v}: < ${CACHE_CADDY_MIN})" >&2
+		fi
 	done
 } >child-pipeline.yml
 

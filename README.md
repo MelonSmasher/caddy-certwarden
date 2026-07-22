@@ -222,6 +222,11 @@ longer API-compatible with the current module graph. The minimum is declared by
 the `caddyserver/caddy/v2` version in [`go.mod`](go.mod); CI reads it and builds
 only Caddy lines at or above it.
 
+The **`-cache`** variant has a higher floor (**Caddy 2.11+**): its Souin storage
+plugins (`darkweak/storages`) track the newest Caddy and Go, so CI builds the
+cache image only for Caddy lines they support. The base image has no such
+dependency and covers the full 2.10+ range.
+
 ## Development
 
 ```bash

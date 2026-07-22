@@ -17,6 +17,11 @@ ARG TARGETARCH
 # it can carry several `--with` flags (e.g. the -cache variant: Souin
 # cache-handler + storage backends). Empty for the plain image.
 ARG EXTRA_WITH=""
+# The caddy builder image pins GOTOOLCHAIN=local. Allow Go to fetch a newer
+# toolchain when a plugin's go.mod requires one beyond the builder's Go (the
+# -cache variant's darkweak storages track the newest Go). No-op when the
+# builder already satisfies the requirement.
+ENV GOTOOLCHAIN=auto
 COPY . /src
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} CGO_ENABLED=0 \
     xcaddy build \
