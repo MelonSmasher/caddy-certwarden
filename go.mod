@@ -1,10 +1,10 @@
 module github.com/MelonSmasher/caddy-certwarden
 
-go 1.25.1
+go 1.25.0
 
 require (
-	github.com/caddyserver/caddy/v2 v2.11.4
-	github.com/caddyserver/certmagic v0.25.3
+	github.com/caddyserver/caddy/v2 v2.10.2
+	github.com/caddyserver/certmagic v0.24.0
 	go.uber.org/zap v1.28.0
 )
 

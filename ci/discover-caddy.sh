@@ -52,6 +52,26 @@ while [ "$page" -le 5 ]; do
 	page=$((page + 1))
 done
 
+# Minimum supported Caddy version = the caddyserver/caddy/v2 requirement in
+# go.mod. Older release lines pull transitively incompatible deps (certmagic /
+# libdns API skew) and can't be built, so they're filtered out here rather than
+# failing the pipeline. Reading it from go.mod keeps the two in sync with no
+# separate knob.
+CADDY_MIN="$(grep -E 'caddyserver/caddy/v2 v[0-9]' go.mod | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)"
+CADDY_MIN="${CADDY_MIN:-0.0.0}"
+
+# Drop candidates below the floor (version-aware compare: keep cv iff cv >= min).
+if [ -s "$tmp" ]; then
+	kept="$(mktemp)"
+	while IFS= read -r cv; do
+		[ -n "$cv" ] || continue
+		if [ "$(printf '%s\n%s\n' "$cv" "$CADDY_MIN" | sort -V | head -n 1)" = "$CADDY_MIN" ]; then
+			printf '%s\n' "$cv" >>"$kept"
+		fi
+	done <"$tmp"
+	mv "$kept" "$tmp"
+fi
+
 # Sorted descending + unique, then keep the first (highest) patch per minor,
 # then take the newest N minors.
 SELECTED="$(sort -Vr -u "$tmp" | awk -F. '!seen[$1"."$2]++' | head -n "$MINORS")"
@@ -83,7 +103,7 @@ if [ "$PUSH" != "true" ]; then
 	SELECTED="$NEWEST"
 fi
 
-echo "policy:   latest patch of the last ${MINORS} minor line(s)"
+echo "policy:   latest patch of the last ${MINORS} minor line(s), Caddy >= ${CADDY_MIN}"
 echo "selected: $(printf '%s ' $SELECTED)"
 echo "newest:   ${NEWEST}"
 echo "push:     ${PUSH}   platforms: ${PLATFORMS}"

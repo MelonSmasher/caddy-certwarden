@@ -13,7 +13,9 @@
 # fixture certificate stay green.
 #
 # The Caddy versions to build against are DISCOVERED at run time (see
-# ci/discover-caddy.sh): the latest patch of the last CADDY_MINORS minor lines.
+# ci/discover-caddy.sh): the latest patch of the last CADDY_MINORS minor lines,
+# filtered to those >= the caddyserver/caddy/v2 floor in go.mod (older lines pull
+# transitively incompatible deps, so they're skipped rather than failing).
 # The discover job generates a child pipeline with one build job per
 # (version x variant).
 #   - Branches / MRs: build amd64 only, no push (compile/compatibility gate).

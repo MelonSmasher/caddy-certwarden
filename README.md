@@ -213,8 +213,14 @@ this plugin distributes and caches the result.
 
 ## Compatibility
 
-Built and tested against the most recent Caddy v2 release lines (see the image
-tags above). Building with `xcaddy` tracks whichever Caddy v2 you build against.
+Requires **Caddy 2.10 or newer**. Prebuilt images are published for the most
+recent Caddy v2 release lines (see the tags above); building with `xcaddy` tracks
+whichever Caddy v2 you build against, as long as it's ≥ 2.10.
+
+The floor is 2.10 because Caddy 2.9 ships an older `certmagic`/`libdns` that is no
+longer API-compatible with the current module graph. The minimum is declared by
+the `caddyserver/caddy/v2` version in [`go.mod`](go.mod); CI reads it and builds
+only Caddy lines at or above it.
 
 ## Development
 
