@@ -1,0 +1,147 @@
+# CI/CD for caddy-certwarden.
+#
+# GitLab is the source of truth (mirror to GitHub via a push remote so the
+# public github.com/MelonSmasher/caddy-certwarden module path resolves for
+# `xcaddy build --with`).
+#
+# Flow: lint -> test -> functional -> discover -> build(child pipeline).
+# test gates everything after it; nothing is published unless it passes.
+#
+# functional (optional gate): builds the image and verifies Caddy actually
+# serves a certificate fetched from a REAL Cert Warden (ci/functional-test.sh).
+# Runs only when the CW_TEST_* variables are set, so forks / setups without a
+# fixture certificate stay green.
+#
+# The Caddy versions to build against are DISCOVERED at run time (see
+# ci/discover-caddy.sh): the latest patch of the last CADDY_MINORS minor lines.
+# The discover job generates a child pipeline with one build job per
+# (version x variant).
+#   - Branches / MRs: build amd64 only, no push (compile/compatibility gate).
+#   - Scheduled pipelines and vX.Y.Z tags: build multi-arch and push.
+# Set up the periodic rebuild under Build > Pipeline schedules; it needs no
+# code change to pick up new Caddy releases.
+#
+# Two image VARIANTS are built for every version:
+#   base   IMAGE_GHCR / IMAGE_DOCKERHUB / IMAGE_HARBOR                (plugin only)
+#   cache  same paths + "-cache" (e.g. .../caddy-certwarden-cache)   (plugin +
+#          Souin cache-handler + storage backends; no Cloudflare DNS plugin).
+# The cache paths are derived by suffix, so no extra variables are needed.
+#
+# CI/CD variables (Settings > CI/CD > Variables, masked + protected for secrets):
+#   GHCR_USER / GHCR_TOKEN            GitHub username + PAT with write:packages
+#   DOCKERHUB_USER / DOCKERHUB_TOKEN  Docker Hub username + access token
+#   IMAGE_HARBOR   (optional) full image path in a private registry, e.g.
+#                   harbor.example.com/library/caddy-certwarden. When set, images
+#                   are also pushed there; the login host is derived from it. The
+#                   cache variant is pushed to the same path + "-cache". Leave
+#                   unset (e.g. on forks) to skip the private push.
+#   HARBOR_USER / HARBOR_TOKEN        private-registry creds (only if IMAGE_HARBOR set)
+#   CADDY_MINORS    (optional) how many minor lines to build against; default 3.
+#   CW_TEST_URL / CW_TEST_CERT   (optional) Cert Warden base URL + fixture cert NAME
+#   CW_TEST_KEY    (optional, masked) combined download key
+#                  <cert-api-key>.<private-key-api-key>; when set, the functional
+#                  stage runs against the real Cert Warden.
+
+stages:
+  - lint
+  - test
+  - functional
+  - prepare
+  - build
+
+variables:
+  GO_VERSION: "1.25"
+  CADDY_MINORS: "3"
+  IMAGE_GHCR: "ghcr.io/melonsmasher/caddy-certwarden"
+  IMAGE_DOCKERHUB: "docker.io/melonsmasher/caddy-certwarden"
+  # Keep the module cache inside the project so it can be cached between jobs.
+  GOPATH: "$CI_PROJECT_DIR/.go"
+
+cache:
+  key: "go-mod-$CI_COMMIT_REF_SLUG"
+  paths:
+    - .go/pkg/mod/
+
+# ---------------------------------------------------------------------------
+# lint: formatting + go vet
+# ---------------------------------------------------------------------------
+lint:
+  stage: lint
+  image: golang:${GO_VERSION}
+  script:
+    - |
+      unformatted="$(gofmt -l .)"
+      if [ -n "$unformatted" ]; then
+        echo "These files are not gofmt-clean:"; echo "$unformatted"; exit 1
+      fi
+    - go vet ./...
+
+# ---------------------------------------------------------------------------
+# test: race detector + coverage (gate for everything after)
+# ---------------------------------------------------------------------------
+test:
+  stage: test
+  image: golang:${GO_VERSION}
+  script:
+    - go test -race -covermode=atomic -coverprofile=coverage.out ./...
+    - go tool cover -func=coverage.out | tail -1
+  coverage: '/total:\s+\(statements\)\s+(\d+\.\d+)%/'
+  artifacts:
+    paths:
+      - coverage.out
+    expire_in: 1 week
+
+# ---------------------------------------------------------------------------
+# functional: build the image and prove Caddy serves a certificate fetched from
+# a real Cert Warden (ci/functional-test.sh). Gated on CW_TEST_KEY, so it only
+# runs where a fixture certificate + credentials are configured. Gates the
+# build/publish stages that follow.
+# ---------------------------------------------------------------------------
+functional:
+  stage: functional
+  tags:
+    - docker
+  image: docker:latest
+  services:
+    - docker:dind
+  rules:
+    - if: '$CW_TEST_KEY'
+      when: on_success
+    - when: never
+  before_script:
+    - apk add --no-cache curl openssl
+  script:
+    # Native single-arch build (BuildKit); --provenance=false keeps it a plain
+    # loadable image. PROBE_HOST=docker reaches the published port via the dind
+    # service; the runner is on the internal network so no --add-host is needed.
+    - docker build --provenance=false -t caddy-certwarden:func .
+    - IMAGE=caddy-certwarden:func PROBE_HOST=docker sh ci/functional-test.sh
+
+# ---------------------------------------------------------------------------
+# discover: resolve the supported Caddy versions and generate the build matrix
+# as a child pipeline (one build job per version).
+# ---------------------------------------------------------------------------
+discover:
+  stage: prepare
+  image: alpine:3.20
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - sh ci/discover-caddy.sh
+  artifacts:
+    paths:
+      - child-pipeline.yml
+    expire_in: 1 hour
+
+# ---------------------------------------------------------------------------
+# build: run the generated child pipeline. `strategy: depend` mirrors the
+# child pipeline's status here, so a compile failure against any supported
+# Caddy version fails this pipeline.
+# ---------------------------------------------------------------------------
+build:
+  stage: build
+  trigger:
+    include:
+      - artifact: child-pipeline.yml
+        job: discover
+    strategy: depend

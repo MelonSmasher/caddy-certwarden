@@ -1,0 +1,16 @@
+# Keep the build context small and reproducible.
+.git/
+.gitlab-ci.yml
+.github/
+ci/
+.go/
+dist/
+caddy
+coverage.out
+coverage.html
+*.test
+certwarden-cache/
+README.md
+LICENSE
+.gitignore
+.dockerignore
