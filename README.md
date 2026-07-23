@@ -56,19 +56,26 @@ COPY Caddyfile /etc/caddy/Caddyfile
 
 #### Image variants
 
-Two variants are published for every tag below, differing only in the plugins
+Four variants are published for every tag below, differing only in the plugins
 compiled in:
 
 | Image | Plugins | Use when |
 |-------|---------|----------|
 | `caddy-certwarden` | the certwarden manager only | you just need Cert Warden certificates |
+| `caddy-certwarden-cfip` | certwarden **+** [`caddy-cloudflare-ip`](https://github.com/WeidiDeng/caddy-cloudflare-ip) (a `trusted_proxies` IP-range source for `cloudflare`) | you sit behind Cloudflare and use `trusted_proxies cloudflare` |
 | `caddy-certwarden-cache` | certwarden **+** the [Souin](https://github.com/darkweak/souin) `cache-handler` and its storage backends (redis, badger, etcd, nuts, olric, nats, otter, simplefs) | the proxy also does HTTP response caching |
+| `caddy-certwarden-cache-cfip` | certwarden **+** both of the above | you want both caching and the Cloudflare IP source |
 
 ```bash
+docker pull ghcr.io/melonsmasher/caddy-certwarden-cfip:latest
 docker pull ghcr.io/melonsmasher/caddy-certwarden-cache:latest
-# or
-docker pull melonsmasher/caddy-certwarden-cache:latest
+docker pull ghcr.io/melonsmasher/caddy-certwarden-cache-cfip:latest
+# (each is also on Docker Hub as melonsmasher/<image>)
 ```
+
+The `-cfip` plugin is the Cloudflare **IP-range source** (`trusted_proxies
+cloudflare`), not the Cloudflare **DNS** plugin — with Cert Warden the proxy no
+longer performs ACME/DNS-01, so that plugin isn't needed in any variant.
 
 Images are published for `linux/amd64` and `linux/arm64`, and are built against
 the last few Caddy release lines. Tags let you pin as loosely or tightly as you
@@ -221,10 +228,11 @@ longer API-compatible with the current module graph. The minimum is declared by
 the `caddyserver/caddy/v2` version in [`go.mod`](go.mod); CI reads it and builds
 only Caddy lines at or above it.
 
-The **`-cache`** variant has a higher floor (**Caddy 2.11+**): its Souin storage
-plugins (`darkweak/storages`) track the newest Caddy and Go, so CI builds the
-cache image only for Caddy lines they support. The base image has no such
-dependency and covers the full 2.10+ range.
+The **`-cache`** and **`-cache-cfip`** variants have a higher floor (**Caddy
+2.11+**): their Souin storage plugins (`darkweak/storages`) track the newest
+Caddy and Go, so CI builds those images only for Caddy lines they support. The
+base and **`-cfip`** images have no such dependency and cover the full 2.10+
+range.
 
 ## Development
 

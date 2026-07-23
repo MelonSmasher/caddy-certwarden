@@ -12,14 +12,20 @@
 #   - Everything else (branches/MRs) builds amd64 only and does not push, acting
 #     as a compile/compatibility gate across every supported Caddy version.
 #
-# Two image VARIANTS are built for every selected Caddy version:
-#   - base   (caddy-certwarden)        the plugin only.
-#   - cache  (caddy-certwarden-cache)  the plugin + Souin cache-handler and
-#            storage backends, for proxies that also do response caching. It
-#            deliberately omits the Cloudflare DNS plugin: with Cert Warden the
-#            proxy no longer performs ACME/DNS-01, so that token is not needed.
-# The cache variant's registry paths are the base paths + "-cache" (see
-# build-and-push.sh IMAGE_SUFFIX).
+# Four image VARIANTS are built for every selected Caddy version, differing only
+# in the plugins compiled in (registry path = base path + suffix; see
+# build-and-push.sh IMAGE_SUFFIX):
+#   - base       (caddy-certwarden)             the plugin only.
+#   - cfip       (caddy-certwarden-cfip)        + WeidiDeng/caddy-cloudflare-ip,
+#                the Cloudflare trusted-proxy IP range source.
+#   - cache      (caddy-certwarden-cache)       + the Souin cache-handler and
+#                storage backends, for proxies that also do response caching.
+#   - cache-cfip (caddy-certwarden-cache-cfip)  + both of the above.
+# The cache and cache-cfip variants carry the darkweak storages, which pin a
+# newer Caddy, so they are only built for Caddy >= CACHE_CADDY_MIN (below); the
+# base and cfip variants cover the full base range (Caddy >= CADDY_MIN).
+# None of the variants add the Cloudflare *DNS* plugin: with Cert Warden the
+# proxy no longer performs ACME/DNS-01, so that token is not needed.
 #
 # Requires: curl, jq. Reads (from the parent pipeline): CADDY_MINORS,
 # IMAGE_GHCR, IMAGE_DOCKERHUB, IMAGE_HARBOR, CI_COMMIT_TAG, CI_PIPELINE_SOURCE.
@@ -46,6 +52,12 @@ CACHE_WITH="--with github.com/darkweak/souin/plugins/caddy \
 --with github.com/darkweak/storages/nats/caddy \
 --with github.com/darkweak/storages/otter/caddy \
 --with github.com/darkweak/storages/simplefs/caddy"
+
+# Extra xcaddy module for the -cfip variant: the Cloudflare trusted-proxy IP
+# range source (used by the `trusted_proxies cloudflare` directive). It's a small
+# pure-Go plugin with a low Caddy floor (go.mod requires only v2.6.3), so it
+# builds across the full base range and needs no separate floor knob.
+CFIP_WITH="--with github.com/WeidiDeng/caddy-cloudflare-ip"
 
 # Collect plain X.Y.Z release tags from the official Caddy image.
 tmp="$(mktemp)"
@@ -169,17 +181,24 @@ seen_majors=""
 			*" $major "*) ;;
 			*) major_latest=true; seen_majors="$seen_majors $major" ;;
 		esac
+		# base + cfip: both cover the full base range (Caddy >= CADDY_MIN).
 		emit_build_job "" "" \
 			"caddy-certwarden" \
 			"Caddy with the certwarden certificate manager (cached certificates from Cert Warden)"
-		# The cache variant's storage plugins pin a newer Caddy than the base
-		# plugin, so only emit it for Caddy >= CACHE_CADDY_MIN.
+		emit_build_job "-cfip" "$CFIP_WITH" \
+			"caddy-certwarden-cfip" \
+			"Caddy with the certwarden certificate manager plus the Cloudflare trusted-proxy IP range source"
+		# cache + cache-cfip: the Souin storage plugins pin a newer Caddy than the
+		# base plugin, so only emit them for Caddy >= CACHE_CADDY_MIN.
 		if [ "$(printf '%s\n%s\n' "$v" "$CACHE_CADDY_MIN" | sort -V | head -n 1)" = "$CACHE_CADDY_MIN" ]; then
 			emit_build_job "-cache" "$CACHE_WITH" \
 				"caddy-certwarden-cache" \
 				"Caddy with the certwarden certificate manager plus the Souin cache-handler and storage backends"
+			emit_build_job "-cache-cfip" "$CACHE_WITH $CFIP_WITH" \
+				"caddy-certwarden-cache-cfip" \
+				"Caddy with the certwarden certificate manager, the Souin cache-handler and storage backends, and the Cloudflare trusted-proxy IP range source"
 		else
-			echo "  (skip cache variant for ${v}: < ${CACHE_CADDY_MIN})" >&2
+			echo "  (skip cache + cache-cfip variants for ${v}: < ${CACHE_CADDY_MIN})" >&2
 		fi
 	done
 } >child-pipeline.yml

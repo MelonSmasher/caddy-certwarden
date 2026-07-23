@@ -23,11 +23,15 @@
 # Set up the periodic rebuild under Build > Pipeline schedules; it needs no
 # code change to pick up new Caddy releases.
 #
-# Two image VARIANTS are built for every version:
-#   base   IMAGE_GHCR / IMAGE_DOCKERHUB / IMAGE_HARBOR                (plugin only)
-#   cache  same paths + "-cache" (e.g. .../caddy-certwarden-cache)   (plugin +
-#          Souin cache-handler + storage backends; no Cloudflare DNS plugin).
-# The cache paths are derived by suffix, so no extra variables are needed.
+# Four image VARIANTS are built for every version, derived from the base paths
+# (IMAGE_GHCR / IMAGE_DOCKERHUB / IMAGE_HARBOR) by suffix, so no extra variables
+# are needed:
+#   base        (no suffix)     plugin only
+#   -cfip       + "-cfip"       + WeidiDeng/caddy-cloudflare-ip (trusted_proxies)
+#   -cache      + "-cache"      + Souin cache-handler + storage backends
+#   -cache-cfip + "-cache-cfip" + both of the above
+# No variant adds the Cloudflare DNS plugin (Cert Warden handles ACME, not the
+# proxy). See ci/discover-caddy.sh for per-variant Caddy floors.
 #
 # CI/CD variables (Settings > CI/CD > Variables, masked + protected for secrets):
 #   GHCR_USER / GHCR_TOKEN            GitHub username + PAT with write:packages
@@ -35,7 +39,7 @@
 #   IMAGE_HARBOR   (optional) full image path in a private registry, e.g.
 #                   harbor.example.com/library/caddy-certwarden. When set, images
 #                   are also pushed there; the login host is derived from it. The
-#                   cache variant is pushed to the same path + "-cache". Leave
+#                   variants are pushed to the same path + their suffix. Leave
 #                   unset (e.g. on forks) to skip the private push.
 #   HARBOR_USER / HARBOR_TOKEN        private-registry creds (only if IMAGE_HARBOR set)
 #   CADDY_MINORS    (optional) how many minor lines to build against; default 3.
