@@ -104,8 +104,7 @@ app.example.com, api.example.com {
         get_certificate certwarden {
             base_url         {env.CW_BASE_URL}
             cache_dir        /var/lib/caddy/certwarden
-            certificate      app-cert {env.CW_APP_KEY}
-            certificate      api-cert {env.CW_API_KEY}
+            certificate      {env.CW_CERT_NAME} {env.CW_API_KEY}
         }
     }
     reverse_proxy upstream:8080
